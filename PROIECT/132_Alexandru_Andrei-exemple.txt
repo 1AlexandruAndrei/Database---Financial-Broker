@@ -1,0 +1,162 @@
+
+--numele, prenumele si suma de bani din portofel pe care o are fiecare client a carui broker contine litera c in nume
+--FUNCTIE PE SIRURI CARACTERE + CLAUZA WITH + GRUPARE
+with brk as (
+            select id_broker from broker where 
+            lower(nume) like '%c%'
+            )
+select c.nume, c.prenume, sum(p.balanta) as "SUMA"
+from client c, portofoliu p
+where c.id_client=p.id_client
+and c.id_broker in (select id_broker from brk)
+group by c.nume, c.prenume;
+
+--//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+-- Afisati daca o companie a oferit sau nu dividende inainte de data la care compania REGINA MARIA a oferit dividend,
+--la care se adauga un trimestru(adica 3 luni), 
+--dividendele oferite, si sortati dupa data in care au fost oferite
+-- NVL + DECODE + FUNCTIE PT DATE
+SELECT c.nume,
+DECODE(d.valoare, NULL, 'Compania nu a oferit dividend', 'Compania a oferit dividend') AS "DIVIDEND OFERIT",
+NVL(d.valoare, 0) AS VALOARE_DIVIDEND, 
+d.data_plata
+FROM DIVIDEND d, COMPANIE c
+where d.data_plata < add_months((select d1.data_plata 
+from dividend d1, companie c
+where c.id_companie=d1.id_companie
+and upper(c.nume) LIKE '%REGINA MARIA%'), 3)
+and c.id_companie=d.id_companie
+order by 4;
+
+select * from dividend;
+
+--//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+--numele companiilor din sectorul energetic, tipul lor (mare sau mic, in functie de capitalizare) si id-ul ordinelor corespunzatoare
+-- CASE + FUNCTIE PE SIRURI CARACTERE
+SELECT c.nume, 
+       CASE
+       WHEN c.capitalizare >= 1000000000 THEN 'Companie Mare'
+       WHEN c.capitalizare < 1000000000 THEN 'Companie Mica'
+       ELSE 'Necunoscuta'
+       END 
+       AS TIP_COMPANIE,
+        o.id_ordin, o.tip, o.pret_unitate*o.numar as "PRET TOTAL",  o.stare
+FROM ordin o, actiune a, companie c
+where o.id_ordin=a.id_ordin and 
+a.id_companie=c.id_companie
+and lower(c.sector)='energie';
+
+------------------------------
+
+--//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+--brokerul cu clienti a caror portofolii au o balanta mai mare de 100000000 RON.
+-- cereri sincronizate in 3 tabele
+select distinct b.nume
+            from broker b
+            join client c on b.id_broker=c.id_broker
+            where c.nume in ( select c1.nume from client c1
+                              join portofoliu p on p.id_client=c.id_client
+                              where p.balanta>100000000 
+                              );
+                              
+--//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+--numele companiilor din sectorul medical si simbolul lor daca au existat investitori pana in anul 2022
+--GROUP BY + FUNCTIE DATA CALENDARISTICA + CERERE IN FROM
+SELECT c.nume, c.simbol
+FROM (
+    SELECT id_companie, nume, simbol
+    FROM companie
+    where sector='medical'
+    
+) c
+JOIN investeste i ON i.id_companie = c.id_companie
+WHERE EXTRACT(YEAR FROM i.data_achizitie) < 2022
+group by c.nume, c.simbol;
+
+--//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+--sa se stearga dividendele oferite de catre companiile din sectorul vitivinicol
+delete from dividend
+where id_companie in (select id_companie
+                      from companie
+                      where sector='vitivinicola');
+
+--sa se stearga etf-urile care au pretul mai mic decat jumatate din pretul mediu al etf-urile
+delete from etf
+where pret_curent<(select avg(pret_curent) from etf)/2;
+
+--
+
+-- sa se stabileasca valoarea de 15 lei pentru obligatiunile emise de catre Statul Roman (prin orice Minister)
+update obligatiune
+set valoare=15
+where lower(emitent) like 'ministerul%';
+commit;
+
+--//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+-- primele 7 companii impreuna cu capitalizarea lor, sortate dupa capitalizare in ordine descrescatoare, in care actionarii companiei sa aiba aceeasi adresa ca a actionarului "Sasu Jean"
+-- TOP N
+select c.nume,c.capitalizare from actionar a, investeste i, companie c
+where rownum<=3
+and c.id_companie=i.id_companie
+and a.id_actionar=i.id_actionar
+and lower(a.adresa) = (select lower(adresa) from actionar where lower(nume)='sasu jean')
+group by c.nume,c.capitalizare
+order by 2 desc;
+
+select * from 
+                (select ;
+                
+select * from companie;
+select * from investeste;
+
+--ANALIZA TOP N
+--procentul din companie, precum si invstitorii, pe care il au cele mai bune 10 valori medii ale procentelor pe care le au actionarii 
+WITH topsalarii AS (
+  SELECT *
+  FROM (
+         SELECT avg(procent) medie
+         FROM investeste
+         GROUP BY id_actionar
+         ORDER BY avg(procent) desc
+      )
+  WHERE rownum <= 8)
+SELECT id_actionar, avg(procent)
+FROM investeste
+group by id_actionar
+having avg(procent) in (select medie from topsalarii)
+order by 2 desc;
+
+--numele actionarilor care sunt persoane juridice, tipul lor, adresa, si compania in care au investit, in cazul in care compania a oferit dividedn mai mare decat media dividendelor oferite de toate companiile.
+--se cere id-ul companiei in care actionarii investesc, precum si numele, sectorul, valoarea dividendului oferit de companie si data platii dividendului
+-- OUTER JOIN 4 TABELE
+select  a.nume as "NUME ACTIONAR", a.tip_actionar, a.adresa, c.id_companie, c.nume, c.sector,  d.valoare, d.data_plata from companie c
+full  outer join dividend d on c.id_companie=d.id_companie
+full outer join investeste i on i.id_companie=c.id_companie
+full outer join actionar a on a.id_actionar=i.id_actionar
+where a.tip_actionar='persoana juridica'
+and d.valoare > (select avg(valoare) from dividend) ;
+
+
+--DIVISION
+--numele actionarului si adresa sa daca acesta a investit la cel putin aceleasi companii ca si actionarul care are id-ul 333
+select distinct a.nume, a.adresa
+from investeste i, actionar a
+where a.id_actionar=i.id_actionar and 
+not exists 
+          (select i1.id_companie
+            from investeste i1, companie c
+            where i1.id_companie=c.id_companie
+            and i1.id_actionar=333
+        minus
+            (select i1.id_companie
+            from investeste i1, companie c
+            where i1.id_companie=c.id_companie
+            and i.id_actionar=i1.id_actionar))
+and i.id_actionar !=333;
+
+
+
+select * from companie;
